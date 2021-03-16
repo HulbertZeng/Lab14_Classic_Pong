@@ -1,13 +1,13 @@
  /* Author: Hulbert Zeng
  * Partner(s) Name (if applicable):  
  * Lab Section: 021
- * Assignment: Lab #14  Exercise #2
+ * Assignment: Lab #14  Exercise #1
  * Exercise Description: [optional - include for your own benefit]
  *
  * I acknowledge all content contained herein, excluding template or example
  * code, is my own original work.
  *
- *  Demo Link: Youtube URL>
+ *  Demo Link: https://youtu.be/x3kW_hsmN3c
  */ 
 #include <avr/io.h>
 #ifdef _SIMULATE_
