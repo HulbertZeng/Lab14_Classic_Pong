@@ -62,9 +62,13 @@ void Set_A2D_Pin(unsigned char pinNum) {
 
 
 // shared task variables
-unsigned char game_over = 0;
+unsigned char game_over = 1;
 unsigned char p_score = 0;
 unsigned char e_score = 0;
+unsigned char w_row[3] = {0xDF, 0x8F, 0xDF};
+unsigned char w_pattern[3] = {};
+unsigned char restart = 0;
+unsigned char ai_enable = 0;
 
 // player paddle control
 enum player { p_wait, p_left, p_right };
@@ -76,6 +80,11 @@ unsigned char p_mid = 0xDF;
 int player(int state) {
     unsigned short joystick = ADC;
     static signed char p_y = 0;
+    if(restart) {
+        p_y = 0;
+        p_row = 0x8F;
+        p_mid = 0xDF;
+    }
     switch(state) {
         case p_wait:
             if(joystick < 500) {
@@ -108,15 +117,58 @@ int player(int state) {
 }
 
 
-// enemy or obstacle control and positions
-enum enemy { e_wait, e_left, e_right };
+// enemy paddle control
+enum enemy { e_wait, e_left, e_right, e_buffer };
 // task variables
-unsigned char e_row = 0x00;
+unsigned char e_row = 0x8F;
 const unsigned char e_pattern = 0x01;
 unsigned char e_mid = 0xDF;
+unsigned char left = 0;
+unsigned char right = 0;
 
 int enemy(int state) {
-    switch(state) {}
+    left = (~PINB) & 0x01;
+    right = (~PINB) & 0x02;
+    static signed e_y = 0;
+    if(restart) {
+        e_y = 0;
+        e_row = 0x8F;
+        e_mid = 0xDF;
+    }
+    switch(state) {
+        case e_wait:
+            if(right) {
+                state = e_right;
+            }
+            if(left) {
+                state = e_left;
+            }
+            break;
+        case e_right:
+            if(e_y < 1) {
+                e_row = (e_row >> 1) | 0x80;
+                e_mid = (e_mid >> 1) | 0x80;
+                ++e_y;
+            }
+            state = e_buffer;
+            break;
+        case e_left:
+            if(e_y > -1) {
+                e_row = (e_row << 1) | 0x01;
+                e_mid = (e_mid << 1) | 0x01;
+                --e_y;
+            }
+            state = e_buffer;
+            break;
+        case e_buffer:
+            if(!left && !right) {
+                state = e_wait;
+            } else {
+                state = e_buffer;
+            }
+            break;
+        default: state = e_wait; break;
+    }
 
     return state;
 }
@@ -134,6 +186,14 @@ unsigned char b_spin = 1;
 int ball(int state) {
     static signed char b_y = 0;
     unsigned short joystick = ADC;
+    if(restart) {
+        restart = 0;
+        b_speed = 4;
+        b_delay = 4;
+        b_spin = 1;
+        b_y = 0;
+        state = start;
+    }
     switch(state) {
         case start:
             b_row = 0xDF;
@@ -159,6 +219,9 @@ int ball(int state) {
                     }
                 } else if(b_pattern == 0x80) {
                     ++e_score;
+                    w_pattern[0] = 0x04;
+                    w_pattern[1] = 0x02;
+                    w_pattern[2] = 0x01;
                     game_over = 1;
                     state = end;
                 } else {
@@ -197,6 +260,9 @@ int ball(int state) {
                     }
                 } else if(b_pattern == 0x80) {
                     ++e_score;
+                    w_pattern[0] = 0x04;
+                    w_pattern[1] = 0x02;
+                    w_pattern[2] = 0x01;
                     game_over = 1;
                     state = end;
                 } else {
@@ -223,11 +289,11 @@ int ball(int state) {
                     state = rightup;
                 } else if((b_pattern == 0x02) && (b_row == (b_row | e_row))) {
                     state = leftdown;
-                    /*if(~PINB != 0) {
+                    if(left || right) {
                         b_spin = 2;
                     } else {
                         b_spin = 1;
-                    }*/
+                    }
                     if(e_mid == b_row) {
                         ++b_speed;
                     } else if(b_speed > 0) {
@@ -235,6 +301,9 @@ int ball(int state) {
                     }
                 } else if(b_pattern == 0x01) {
                     ++p_score;
+                    w_pattern[0] = 0x80;
+                    w_pattern[1] = 0x40;
+                    w_pattern[2] = 0x20;
                     game_over = 1;
                     state = end;
                 } else {
@@ -260,19 +329,22 @@ int ball(int state) {
                    state = rightdown;
                 } else if((b_pattern == 0x02) && (b_row == (b_row | e_row))) {
                    state = leftup;
-                    /*if(~PINB != 0) {
+                    if(left || right) {
                         b_spin = 2;
                     } else {
                         b_spin = 1;
-                    }*/
+                    }
                     if(e_mid == b_row) {
                         ++b_speed;
                     } else if(b_speed > 0) {
                         --b_speed;
                     }
                 } else if(b_pattern == 0x01) {
-                   ++p_score;
-                   game_over = 1;
+                    ++p_score;
+                    w_pattern[0] = 0x80;
+                    w_pattern[1] = 0x40;
+                    w_pattern[2] = 0x20;
+                    game_over = 1;
                    state = end;
                 } else {
                     if(b_spin == 1 || b_y == 1) {
@@ -306,31 +378,103 @@ int ball(int state) {
 
 
 // displays player, enemy, and ball
-enum game { display1, display2, display3, gameover };
+enum game { menu, m_buffer, display1, display2, display3, score, victory, v_buffer };
 // task variables
+unsigned char win_row[3] = {0x40, 0x00, 0x40};
+unsigned char win_pattern[3] = {};
+unsigned char menu_row[8] = {0xFF, 0x87, 0xBF, 0xFF, 0xFF, 0xB7, 0x97, 0xAF};
+unsigned char menu_pattern[8] = {0x00, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
 
 int game(int state) {
+    static unsigned timer = 0;
+    static unsigned index = 0;
     switch(state) {
-        case display1:
+        case menu: // game menu
+             transmit_data(menu_pattern[index], menu_row[index]);
+             if(index < 8) {
+                 ++index;
+             } else {
+                 index = 0;
+             }
+             if(left || right) {
+                 if(left) ai_enable = 0;
+                 if(right) ai_enable = 1;
+                 index = 0;
+                 state = m_buffer;
+             }
+             break;
+        case m_buffer:
+             if(!left && !right) {
+                 restart = 1;
+                 game_over = 0;
+                 state = display1;
+             }
+             break;
+        case display1: // display player
              transmit_data(p_pattern, p_row);
              state = display2;
              break;
-        case display2:
+        case display2: // display enemy
              transmit_data(e_pattern, e_row);
              state = display3;
              break;
-        case display3:
+        case display3: // display ball
              transmit_data(b_pattern, b_row);
              if(game_over) {
-                 state = gameover;
+                 state = score;
              } else {
                  state = display1;
              }
              break;
-        case gameover:
-             transmit_data(0x00, 0xFF);
+        case score: // check who won best out of 5
+             transmit_data(w_pattern[index], w_row[index]);
+             if(index < 3) {
+                 ++index;
+             } else {
+                 index = 0;
+             }
+             if(timer < 1000) { // display who won the round
+                 ++timer;
+             } else { // back to gameplay
+                 timer = 0;
+                 index = 0;
+                 game_over = 0;
+                 restart = 1;
+                 if(e_score == 3) { // enemy wins
+                     win_pattern[0] = 0x04;
+                     win_pattern[1] = 0x02;
+                     win_pattern[2] = 0x01;
+                     state = victory;
+                 } else if(p_score == 3) { // player wins
+                     win_pattern[0] = 0x80;
+                     win_pattern[1] = 0x40;
+                     win_pattern[2] = 0x20;
+                     state = victory;
+                 } else { // no one won yet
+                     state = display1;
+                 }
+             }
              break;
-        default: state = display1;
+        case victory: // victory screen
+             transmit_data(win_pattern[index], win_row[index]);
+             if(index < 3) { // display victory screen
+                 ++index;
+             } else {
+                 index = 0;
+             }
+             if(left && right) { // restart the entire game
+                 state = v_buffer;
+             }
+             break;
+        case v_buffer:
+             if(!left && !right) { // restart game variables once buttons released
+                 index = 0;
+                 e_score = 0;
+                 p_score = 0;
+                 state = menu;
+             }
+             break;
+        default: state = menu;
     }
 
     return state;
