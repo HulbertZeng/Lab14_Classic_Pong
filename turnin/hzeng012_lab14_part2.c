@@ -397,8 +397,8 @@ int game(int state) {
                  index = 0;
              }
              if(left != right) { // check which option was selected
-                 if(left) ai_enable = 0;
-                 if(right) ai_enable = 1;
+                 if(left) ai_enable = 1;
+                 if(right) ai_enable = 0;
                  index = 0;
                  state = m_buffer;
              }
